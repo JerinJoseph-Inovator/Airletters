@@ -19,6 +19,11 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.cardSubtitle}>Write a timed message</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Letters')}>
+        <Text style={styles.cardTitle}>📬 Letter History</Text>
+        <Text style={styles.cardSubtitle}>View all sent & received letters</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Map')}>
         <Text style={styles.cardTitle}>🗺️ Simulation Map</Text>
         <Text style={styles.cardSubtitle}>View flight progress & in-transit letters</Text>
@@ -28,6 +33,7 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.cardTitle}>💼 Boarding Pass Vault</Text>
         <Text style={styles.cardSubtitle}>Store PDFs & images offline</Text>
       </TouchableOpacity>
+
     </View>
   );
 }
