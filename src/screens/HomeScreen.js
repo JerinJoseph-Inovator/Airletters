@@ -1,14 +1,61 @@
 // src/screens/HomeScreen.js
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import theme from '../theme';
+import { generateTestFlights, getMidFlightTest } from '../lib/testFlights';
 
 export default function HomeScreen({ navigation }) {
+  
+  const startTestSimulation = (testType) => {
+    let testFlights;
+    let message;
+    
+    if (testType === 'mid-flight') {
+      testFlights = getMidFlightTest();
+      message = 'Starting mid-flight simulation (both flights 50% complete)';
+    } else {
+      testFlights = generateTestFlights();
+      message = 'Starting test simulation (Flight A started 30min ago, Flight B started 20min ago)';
+    }
+    
+    Alert.alert(
+      'Test Mode Activated! 🧪',
+      message,
+      [
+        {
+          text: 'Go to Map',
+          onPress: () => navigation.navigate('Map', testFlights)
+        }
+      ]
+    );
+  };
+
   return (
     <View style={styles.page}>
       <Text style={styles.title}>AirLetters ✈️</Text>
       <Text style={styles.subtitle}>Share mid-flight letters — simulated offline</Text>
 
+      {/* Test Mode Section */}
+      {/* <View style={styles.testSection}>
+        <Text style={styles.testTitle}>🧪 Test Mode</Text>
+        <TouchableOpacity 
+          style={[styles.card, styles.testCard]} 
+          onPress={() => startTestSimulation('beginning')}
+        >
+          <Text style={styles.cardTitle}>🚀 Start Fresh Test</Text>
+          <Text style={styles.cardSubtitle}>Flight A: 30min in progress, Flight B: 20min in progress</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.card, styles.testCard]} 
+          onPress={() => startTestSimulation('mid-flight')}
+        >
+          <Text style={styles.cardTitle}>⚡ Mid-Flight Test</Text>
+          <Text style={styles.cardSubtitle}>Both flights 50% complete - perfect for letter testing</Text>
+        </TouchableOpacity>
+      </View> */}
+
+      {/* Regular Navigation */}
       <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('FlightSetup')}>
         <Text style={styles.cardTitle}>✈️ Flight Setup</Text>
         <Text style={styles.cardSubtitle}>Enter both flights to simulate</Text>
@@ -34,6 +81,11 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.cardSubtitle}>Store PDFs & images offline</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('SyncStatus')}>
+  <Text style={styles.cardTitle}>🔄 Sync Status</Text>
+  <Text style={styles.cardSubtitle}>Monitor offline/online sync</Text>
+</TouchableOpacity>
+
     </View>
   );
 }
@@ -51,7 +103,27 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: theme.colors.muted,
+    marginBottom: 16,
+  },
+  testSection: {
     marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#FEF3C7',
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  testTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 12,
+  },
+  testCard: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    marginBottom: 8,
   },
   card: {
     backgroundColor: theme.colors.card,

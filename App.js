@@ -3,7 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import theme from './src/theme';
-
+import SyncStatusScreen from './src/screens/SyncStatusScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import FlightSetupScreen from './src/screens/FlightSetupScreen';
 import ComposeScreen from './src/screens/ComposeScreen';
