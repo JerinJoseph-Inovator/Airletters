@@ -16,7 +16,7 @@ import {
   Modal
 } from 'react-native';
 import { DateTime } from 'luxon';
-import { saveLetter } from '../lib/storage';
+import { saveLetter, getCurrentUser } from '../lib/storage';
 import { flightProgressPercent } from '../lib/simulation';
 import defaultFlights from '../lib/defaultFlights';
 import theme from '../theme';
@@ -37,6 +37,7 @@ export default function ComposeScreen({ navigation, route }) {
   const [progressA, setProgressA] = useState(0);
   const [progressB, setProgressB] = useState(0);
   const [letterSent, setLetterSent] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   
   // Animation references
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -51,6 +52,8 @@ export default function ComposeScreen({ navigation, route }) {
   useEffect(() => {
     // Load saved draft when component mounts
     loadDraft();
+    // Load current user
+    loadCurrentUser();
     
     // Start entrance animation
     Animated.sequence([
@@ -132,6 +135,17 @@ export default function ComposeScreen({ navigation, route }) {
       }
     };
   }, [text]);
+
+  // Load current user
+  const loadCurrentUser = async () => {
+    try {
+      const userType = await getCurrentUser();
+      setCurrentUser(userType);
+    } catch (error) {
+      console.log('Error loading current user:', error);
+      setCurrentUser('A'); // Default to A
+    }
+  };
 
   // Load draft from storage
   const loadDraft = async () => {
@@ -495,6 +509,31 @@ export default function ComposeScreen({ navigation, route }) {
           </Text>
         </View>
 
+        {/* User Identity Card */}
+        {currentUser && (
+          <View style={styles.userIdentityCard}>
+            <View style={styles.userRow}>
+              <View style={styles.fromUser}>
+                <Text style={styles.userLabel}>From:</Text>
+                <Text style={styles.userText}>User {currentUser}</Text>
+                <Text style={styles.flightText}>
+                  {currentUser === 'A' ? flightA.flightNumber : flightB.flightNumber}
+                </Text>
+              </View>
+              <View style={styles.arrow}>
+                <Text style={styles.arrowText}>→</Text>
+              </View>
+              <View style={styles.toUser}>
+                <Text style={styles.userLabel}>To:</Text>
+                <Text style={styles.userText}>User {currentUser === 'A' ? 'B' : 'A'}</Text>
+                <Text style={styles.flightText}>
+                  {currentUser === 'A' ? flightB.flightNumber : flightA.flightNumber}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Flight Status Card */}
         <Animated.View style={[styles.statusCard, {
           transform: [{ scale: isCountdownActive ? pulseAnim : 1 }]
@@ -669,6 +708,55 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: theme.colors.textMuted,
+  },
+  userIdentityCard: {
+    backgroundColor: theme.colors.card,
+    marginHorizontal: theme.spacing.page,
+    marginBottom: theme.spacing.lg,
+    borderRadius: theme.radius.xl,
+    padding: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.borderLight,
+    ...theme.shadows.sm,
+  },
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  fromUser: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  toUser: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  arrow: {
+    paddingHorizontal: theme.spacing.lg,
+  },
+  arrowText: {
+    fontSize: 24,
+    color: theme.colors.primary,
+    fontWeight: '600',
+  },
+  userLabel: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  userText: {
+    fontSize: 16,
+    color: theme.colors.text,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  flightText: {
+    fontSize: 14,
+    color: theme.colors.primary,
+    fontWeight: '500',
   },
   statusCard: {
     backgroundColor: theme.colors.card,

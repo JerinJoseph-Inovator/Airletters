@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LETTERS_KEY = '@airletters_letters';
 const FLIGHTS_KEY = '@airletters_flights';
+const USER_SELECTION_KEY = '@airletters_user_selection';
 
 // Letter status progression: scheduled -> in_transit -> delivered -> read
 export const LETTER_STATUS = {
@@ -12,10 +13,26 @@ export const LETTER_STATUS = {
   READ: 'read'
 };
 
+// Get current user selection
+export async function getCurrentUser() {
+  try {
+    const userType = await AsyncStorage.getItem(USER_SELECTION_KEY);
+    return userType || 'A'; // Default to A if not set
+  } catch (error) {
+    console.warn('Failed to get current user:', error);
+    return 'A';
+  }
+}
+
 // Save letter with enhanced metadata
 export async function saveLetter(text, sendDelayMinutes = 45) {
   const now = new Date();
   const transitTime = new Date(now.getTime() + parseInt(sendDelayMinutes, 10) * 60000);
+  
+  // Get current user to determine letter direction
+  const currentUser = await getCurrentUser();
+  const fromFlight = currentUser;
+  const toFlight = currentUser === 'A' ? 'B' : 'A';
   
   const letter = {
     id: Math.random().toString(36).slice(2),
@@ -25,10 +42,11 @@ export async function saveLetter(text, sendDelayMinutes = 45) {
     deliveredAt: null,
     readAt: null,
     status: LETTER_STATUS.SCHEDULED,
-    // Animation metadata
-    fromFlight: 'A', // or 'B' - determine which flight sent it
-    toFlight: 'B',   // or 'A' - determine recipient
+    // Animation metadata with proper user direction
+    fromFlight,
+    toFlight,
     animationProgress: 0, // 0 to 1 for map animation
+    senderUser: currentUser, // Track who sent this letter
   };
 
   try {

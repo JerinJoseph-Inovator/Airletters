@@ -19,7 +19,7 @@ import {
   Platform
 } from 'react-native';
 import { DateTime } from 'luxon';
-import { processLetterStatuses, markLetterAsRead, LETTER_STATUS } from '../lib/storage';
+import { processLetterStatuses, markLetterAsRead, LETTER_STATUS, getCurrentUser } from '../lib/storage';
 import { flightProgressPercent } from '../lib/simulation';
 import defaultFlights from '../lib/defaultFlights';
 import theme from '../theme';
@@ -61,6 +61,7 @@ export default function LettersScreen({ navigation }) {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Animation references
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -148,13 +149,26 @@ export default function LettersScreen({ navigation }) {
   const initializeScreen = async () => {
     try {
       setLoading(true);
-      await loadLetters();
+      await Promise.all([
+        loadLetters(),
+        loadCurrentUser()
+      ]);
       startEntranceAnimations();
     } catch (err) {
       setError('Failed to load letters');
       console.error('Initialization error:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCurrentUser = async () => {
+    try {
+      const userType = await getCurrentUser();
+      setCurrentUser(userType);
+    } catch (error) {
+      console.error('Failed to load current user:', error);
+      setCurrentUser('A'); // Default to A
     }
   };
 

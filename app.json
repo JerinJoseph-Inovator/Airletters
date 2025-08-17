@@ -3,7 +3,7 @@
     "name": "AirLetters",
     "slug": "AirLetters",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -28,7 +28,8 @@
     },
     "plugins": [
       "expo-asset",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-video"
     ]
   }
 }
