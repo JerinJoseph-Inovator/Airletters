@@ -12,7 +12,7 @@ import MapScreen from './src/screens/MapScreen';
 import LettersScreen from './src/screens/LettersScreen';
 import UserSelectionScreen, { getUserSelection } from './src/screens/UserSelectionScreen';
 import MovieTimeScreen from './src/screens/MovieTimeScreen';
-// import PDFViewerScreen from './src/screens/PDFViewerScreen';
+import PDFViewerScreen from './src/screens/PDFViewerScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -65,6 +65,7 @@ export default function App() {
         <Stack.Screen name="Letters" component={LettersScreen} options={{ title: 'Letter History' }} />
         <Stack.Screen name="MovieTime" component={MovieTimeScreen} options={{ title: 'Movie Time' }} />
         <Stack.Screen name="Vault" component={VaultScreen} />
+  <Stack.Screen name="PDFViewer" component={PDFViewerScreen} options={{ title: 'Document' }} />
         <Stack.Screen name="Map" component={MapScreen} />
         {/* <Stack.Screen name="PDFViewer" component={PDFViewerScreen} options={{ title: 'View PDF' }} /> */}
       </Stack.Navigator>

@@ -1,0 +1,32 @@
+// src/data/statesGeoData.js
+export const statesGeoJsonData = {
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Karnataka" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [74.0, 18.0], [75.0, 15.0], [76.5, 12.5], [78.0, 11.5], [79.5, 12.0], [80.0, 14.0], [79.0, 15.5], [76.5, 16.5], [74.0, 18.0]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Maharashtra" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [72.0, 21.0], [73.5, 19.0], [74.5, 18.0], [76.0, 17.5], [78.0, 18.0], [77.5, 20.0], [75.5, 21.0], [72.0, 21.0]
+          ]
+        ]
+      }
+    }
+  ]
+};
+
+export default statesGeoJsonData;

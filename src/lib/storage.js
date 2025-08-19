@@ -24,7 +24,7 @@ export async function getCurrentUser() {
   }
 }
 
-// Save letter with enhanced metadata
+// Save letter with enhanced metadata - creates both letters to simulate simultaneous sending
 export async function saveLetter(text, sendDelayMinutes = 45) {
   const now = new Date();
   const transitTime = new Date(now.getTime() + parseInt(sendDelayMinutes, 10) * 60000);
@@ -34,26 +34,44 @@ export async function saveLetter(text, sendDelayMinutes = 45) {
   const fromFlight = currentUser;
   const toFlight = currentUser === 'A' ? 'B' : 'A';
   
-  const letter = {
+  // Create the user's letter
+  const userLetter = {
     id: Math.random().toString(36).slice(2),
     text: text.trim(),
     createdAt: now.toISOString(),
     scheduledSendUTC: transitTime.toISOString(), 
     deliveredAt: null,
     readAt: null,
-    status: LETTER_STATUS.SCHEDULED,
+    status: LETTER_STATUS.IN_TRANSIT, // Start in transit immediately for simulation
     // Animation metadata with proper user direction
     fromFlight,
     toFlight,
     animationProgress: 0, // 0 to 1 for map animation
     senderUser: currentUser, // Track who sent this letter
   };
+  
+  // Create the other user's letter (dummy content for simulation)
+  const otherUserLetter = {
+    id: Math.random().toString(36).slice(2),
+    text: `Letter from User ${toFlight}`, // Dummy content for the other user
+    createdAt: now.toISOString(),
+    scheduledSendUTC: transitTime.toISOString(), 
+    deliveredAt: null,
+    readAt: null,
+    status: LETTER_STATUS.IN_TRANSIT, // Start in transit immediately for simulation
+    // Animation metadata with opposite direction
+    fromFlight: toFlight,
+    toFlight: fromFlight,
+    animationProgress: 0, // 0 to 1 for map animation
+    senderUser: toFlight, // Track who sent this letter
+  };
 
   try {
     const existing = await getLetters();
-    existing.push(letter);
-    await AsyncStorage.setItem(LETTERS_KEY, JSON.stringify(existing));
-    return letter;
+    // Clear any existing letters to avoid duplicates
+    const newLetters = [userLetter, otherUserLetter];
+    await AsyncStorage.setItem(LETTERS_KEY, JSON.stringify(newLetters));
+    return userLetter;
   } catch (error) {
     console.warn('Failed to save letter:', error);
     throw error;
@@ -111,9 +129,9 @@ export async function processLetterStatuses() {
       hasUpdates = true;
     }
     
-    // Check if in-transit letter should be delivered (after 5 minutes of animation)
+    // Check if in-transit letter should be delivered (shortened to 30s for testing)
     if (letter.status === LETTER_STATUS.IN_TRANSIT) {
-      const transitDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const transitDuration = 30 * 1000; // 30 seconds in milliseconds (testing)
       const elapsed = now.getTime() - scheduledTime.getTime();
       const progress = Math.min(elapsed / transitDuration, 1);
       
@@ -153,5 +171,41 @@ export async function getFlights() {
   } catch (error) {
     console.warn('Failed to get flights:', error);
     return null;
+  }
+}
+
+// Clear all letter data
+export async function clearAllLetters() {
+  try {
+    await AsyncStorage.removeItem(LETTERS_KEY);
+    console.log('All letter data cleared successfully');
+    return true;
+  } catch (error) {
+    console.warn('Failed to clear letter data:', error);
+    return false;
+  }
+}
+
+// Clear old delivered/read letters (optional cleanup)
+export async function clearOldLetters(olderThanDays = 7) {
+  try {
+    const letters = await getLetters();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    
+    const filteredLetters = letters.filter(letter => {
+      if (letter.status === LETTER_STATUS.READ || letter.status === LETTER_STATUS.DELIVERED) {
+        const letterDate = new Date(letter.deliveredAt || letter.createdAt);
+        return letterDate >= cutoffDate;
+      }
+      return true; // Keep non-delivered letters
+    });
+    
+    await AsyncStorage.setItem(LETTERS_KEY, JSON.stringify(filteredLetters));
+    console.log(`Cleared ${letters.length - filteredLetters.length} old letters`);
+    return true;
+  } catch (error) {
+    console.warn('Failed to clear old letters:', error);
+    return false;
   }
 }

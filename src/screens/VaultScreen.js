@@ -15,19 +15,26 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUserSelection } from './UserSelectionScreen';
 import theme from '../theme';
 
 const VAULT_KEY = '@airletters_vault';
 
-export default function VaultScreen() {
+export default function VaultScreen({ navigation }) {
   const [boardingPasses, setBoardingPasses] = useState([]);
   const [selectedPass, setSelectedPass] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [noteModalVisible, setNoteModalVisible] = useState(false);
   const [currentNote, setCurrentNote] = useState('');
   const [editingPassId, setEditingPassId] = useState(null);
 
   useEffect(() => {
     loadBoardingPasses();
+    // load current user selection for filtering bundled PDFs
+    (async () => {
+      const u = await getUserSelection();
+      setCurrentUser(u || null);
+    })();
   }, []);
 
   const loadBoardingPasses = async () => {
@@ -254,6 +261,34 @@ export default function VaultScreen() {
     </View>
   );
 
+  const viewBundledPDF = (folder) => {
+    // Assumption: app users are 'A' and 'B' in code; bundled PDFs are named with A and J.
+    // We'll map user 'B' -> 'J' (second user's PDF uses 'J').
+    if (!currentUser) {
+      Alert.alert('No user selected', 'Please select a user from the User Selection screen.');
+      return;
+    }
+
+    const isUserA = currentUser === 'A';
+    try {
+      let assetModule;
+      if (folder === 'Ticket') {
+        assetModule = isUserA
+          ? require('../../assets/pdfs/Ticket/Itinerary_A_done.pdf')
+          : require('../../assets/pdfs/Ticket/Itinerary_J_done.pdf');
+      } else {
+        assetModule = isUserA
+          ? require('../../assets/pdfs/Boarding_Pass/Itinerary_A_done.pdf')
+          : require('../../assets/pdfs/Boarding_Pass/Itinerary_J_done.pdf');
+      }
+
+      navigation.navigate('PDFViewer', { assetModule });
+    } catch (err) {
+      console.warn('Failed to load bundled PDF for', folder, currentUser, err);
+      Alert.alert('Error', 'Failed to load the requested PDF.');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -277,6 +312,22 @@ export default function VaultScreen() {
             {boardingPasses.map(renderBoardingPass)}
           </View>
         )}
+
+        {/* Bundled PDFs for selected user */}
+        <View style={styles.bundledContainer}>
+          <Text style={styles.bundledLabel}>Your Itinerary Documents</Text>
+          <View style={styles.bundledRow}>
+            <TouchableOpacity style={styles.bundleButton} onPress={() => viewBundledPDF('Ticket')}>
+              <Text style={styles.bundleButtonText}>🎫 View Ticket</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.bundleButton} onPress={() => viewBundledPDF('Boarding_Pass')}>
+              <Text style={styles.bundleButtonText}>🛂 Boarding Pass</Text>
+            </TouchableOpacity>
+          </View>
+          {currentUser && (
+            <Text style={styles.bundledHint}>Showing documents for User {currentUser}</Text>
+          )}
+        </View>
       </ScrollView>
 
       {/* Add Button */}
@@ -496,6 +547,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  bundledContainer: {
+    padding: theme.spacing.page,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.borderLight,
+    backgroundColor: theme.colors.cardElevated,
+    marginTop: 12,
+  },
+  bundledLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
+  },
+  bundledRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: theme.spacing.sm,
+  },
+  bundleButton: {
+    flex: 1,
+    paddingVertical: 12,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  bundleButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  bundledHint: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: theme.spacing.xs,
   },
   modalContainer: {
     flex: 1,

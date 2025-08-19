@@ -227,8 +227,8 @@ export default function ComposeScreen({ navigation, route }) {
     const flightAStart = DateTime.fromISO(flightA.departureUTC, { zone: 'utc' });
     const flightAEnd = DateTime.fromISO(flightA.arrivalUTC, { zone: 'utc' });
     
-    // Letter writing window starts exactly at flight departure time and lasts for 1 hour
-    const letterWindowEnd = flightAStart.plus({ hours: 1 });
+  // Letter writing window starts at flight departure and (for testing) lasts 1 minute
+  const letterWindowEnd = flightAStart.plus({ minutes: 1 });
     
     const newProgressA = flightProgressPercent(flightA.departureUTC, flightA.arrivalUTC);
     const newProgressB = flightProgressPercent(flightB.departureUTC, flightB.arrivalUTC);
@@ -243,7 +243,7 @@ export default function ComposeScreen({ navigation, route }) {
       setFlightStatus('waiting');
       setIsCountdownActive(false);
     } else if (now >= flightAStart && now <= letterWindowEnd) {
-      // Flight has started - letter window is OPEN (1-hour window from departure)
+      // Flight has started - letter window is OPEN (1-minute window from departure for testing)
       const timeLeft = letterWindowEnd.diff(now, 'milliseconds').milliseconds;
       setTimeRemaining(timeLeft);
       setFlightStatus('active');
@@ -257,15 +257,18 @@ export default function ComposeScreen({ navigation, route }) {
         useNativeDriver: false,
       }).start();
       
-      // Auto-send letter when time expires (if there's content)
-      if (timeLeft <= 1000 && text.trim() && !letterSent) {
-        handleAutoSendLetter();
-      }
+  // Do not auto-send. Users may compose during the 1-hour window.
+  // Sending is only allowed after the window expires (flightStatus === 'expired').
     } else {
       // Letter window has expired (1 hour after flight departure)
       setTimeRemaining(0);
       setFlightStatus('expired');
       setIsCountdownActive(false);
+      
+      // Auto-send both letters when timer expires (if there's content)
+      if (!letterSent && text.trim()) {
+        handleAutoSendLetter();
+      }
     }
   };
 
@@ -275,9 +278,11 @@ export default function ComposeScreen({ navigation, route }) {
     setLetterSent(true);
     
     try {
+      // Save the current user's letter
       await saveLetter(text, 0); // Send immediately when auto-sent
       await clearDraft(); // Clear saved draft
       
+      // Start the simulation by navigating to map
       Animated.sequence([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -287,10 +292,10 @@ export default function ComposeScreen({ navigation, route }) {
       ]).start();
 
       Alert.alert(
-        'Letter Auto-Sent! ✈️', 
-        'Time\'s up! Your letter has been automatically sent and is now traveling between flights.',
+        'Letters Auto-Sent! ✈️', 
+        'Time\'s up! Both letters have been sent and are now traveling between flights. Watch them on the map!',
         [{ 
-          text: 'Track on Map', 
+          text: 'View Map', 
           onPress: () => navigation.navigate('Map') 
         }]
       );
@@ -307,12 +312,12 @@ export default function ComposeScreen({ navigation, route }) {
       return;
     }
 
-    if (flightStatus !== 'active') {
+    if (flightStatus !== 'expired') {
       Alert.alert(
-        'Cannot Send Now', 
+        'Cannot Send Yet', 
         flightStatus === 'waiting' 
-          ? 'The letter window opens exactly at flight departure time. Please wait!'
-          : 'The letter window has closed. It was open for 1 hour after flight departure.'
+          ? 'The letter window opens exactly at flight departure time. Please wait until it ends to send.'
+          : 'The writing window is still open. You can continue composing; letters will be sent automatically when the window ends.'
       );
       return;
     }
@@ -337,10 +342,10 @@ export default function ComposeScreen({ navigation, route }) {
       ]).start();
 
       Alert.alert(
-        'Letter Sent! ✉️', 
-        'Your letter is now traveling between the flights and will arrive when the destination flight lands.',
+        'Letter Sent ✉️', 
+        'Your letter is now traveling toward the other plane — open the Map to watch the simulation. It will be delivered when both flights land.',
         [{ 
-          text: 'View Journey', 
+          text: 'Open Map', 
           onPress: () => navigation.navigate('Map') 
         }]
       );
@@ -461,13 +466,13 @@ export default function ComposeScreen({ navigation, route }) {
           <TouchableOpacity 
             style={[
               styles.fullScreenSendButton,
-              !text.trim() && styles.fullScreenSendButtonDisabled
+              (flightStatus !== 'expired' || !text.trim()) && styles.fullScreenSendButtonDisabled
             ]}
             onPress={() => {
               handleFullScreenClose();
               setTimeout(() => handleManualSendLetter(), 100); // Small delay to ensure state updates
             }}
-            disabled={!text.trim()}
+            disabled={flightStatus !== 'expired' || !text.trim()}
           >
             <Text style={[
               styles.fullScreenSendButtonText,
@@ -660,25 +665,25 @@ export default function ComposeScreen({ navigation, route }) {
         <TouchableOpacity 
           style={[
             styles.sendButton,
-            (flightStatus !== 'active' || !text.trim() || letterSent) && styles.sendButtonDisabled
+            (flightStatus !== 'expired' || !text.trim() || letterSent) && styles.sendButtonDisabled
           ]} 
           onPress={handleManualSendLetter}
-          disabled={flightStatus !== 'active' || !text.trim() || letterSent}
+          disabled={flightStatus !== 'expired' || !text.trim() || letterSent}
         >
           <Text style={[
             styles.sendButtonText,
-            (flightStatus !== 'active' || !text.trim() || letterSent) && styles.sendButtonTextDisabled
+            (flightStatus !== 'expired' || !text.trim() || letterSent) && styles.sendButtonTextDisabled
           ]}>
             {letterSent ? 'Letter Sent ✅' : 
-             flightStatus === 'active' ? 'Send Letter Now ✉️' : 
+             flightStatus === 'expired' ? 'Send Letter ✉️' : 
              flightStatus === 'waiting' ? 'Waiting for Departure...' : 
-             'Window Closed'}
+             'Auto-Send When Timer Ends ⏰'}
           </Text>
         </TouchableOpacity>
-
-        {flightStatus === 'active' && text.trim() && !letterSent && (
+        
+        {flightStatus === 'active' && (
           <Text style={styles.autoSendNote}>
-            💡 Letter will auto-send when time runs out
+            Letters will be sent automatically when the writing window closes
           </Text>
         )}
       </Animated.View>

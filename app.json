@@ -13,7 +13,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to play movie files from your device.",
+        "NSMicrophoneUsageDescription": "This app may need microphone access for video playback features.",
+        "NSCameraUsageDescription": "This app may need camera access for enhanced video features."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +26,20 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.AirLetters"
+      "package": "com.anonymous.AirLetters",
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_MEDIA_LOCATION",
+        "READ_MEDIA_VIDEO",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,7 +47,28 @@
     "plugins": [
       "expo-asset",
       "expo-web-browser",
-      "expo-video"
-    ]
+      "expo-video",
+      "expo-media-library",
+      "expo-av",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1E40AF",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-file-system",
+        {
+          "requestLegacyExternalStorage": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1cf2c43c-5668-4dc8-a002-0895ce68e3db"
+      }
+    }
   }
 }

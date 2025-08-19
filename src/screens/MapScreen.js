@@ -11,11 +11,16 @@ import {
   Dimensions,
   Platform
 } from 'react-native';
-import MapView, { Marker, Polyline, AnimatedRegion } from 'react-native-maps';
+import MapView, { Marker, Polyline, AnimatedRegion, UrlTile } from 'react-native-maps';
+import { Svg, Polygon as SvgPolygon, G, Text as SvgText } from 'react-native-svg';
+import * as FileSystem from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import theme from '../theme';
 import defaultFlights from '../lib/defaultFlights';
 import { flightProgressPercent } from '../lib/simulation';
-import { processLetterStatuses, getLetters, markLetterAsRead, LETTER_STATUS } from '../lib/storage';
+import { processLetterStatuses, getLetters, markLetterAsRead, clearAllLetters, clearOldLetters, LETTER_STATUS } from '../lib/storage';
+import { citiesData } from '../data/citiesData';
+import { statesGeoJsonData } from '../data/statesGeoData';
 
 const { width, height } = Dimensions.get('window');
 
@@ -39,6 +44,14 @@ const FLIGHT_ROUTES = {
   ]
 };
 
+// Approximate India bounds for offline renderer (lat, lon)
+const INDIA_BOUNDS = {
+  latMin: 6.5,
+  latMax: 35.5,
+  lonMin: 68.0,
+  lonMax: 97.5,
+};
+
 export default function MapScreen({ route, navigation }) {
   const flightA = route?.params?.flightA || defaultFlights.flightA;
   const flightB = route?.params?.flightB || defaultFlights.flightB;
@@ -49,6 +62,13 @@ export default function MapScreen({ route, navigation }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showWeatherLayer, setShowWeatherLayer] = useState(false);
   const [mapStyle, setMapStyle] = useState('standard');
+  const [mapKey, setMapKey] = useState('map-standard');
+  const [mapReady, setMapReady] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineTilesAvailable, setOfflineTilesAvailable] = useState(false);
+  const [stateGeoJson, setStateGeoJson] = useState(null);
+  const [cities, setCities] = useState(null);
+  const [lettersSim, setLettersSim] = useState([]);
   
   // Animation refs
   const mapRef = useRef();
@@ -63,7 +83,63 @@ export default function MapScreen({ route, navigation }) {
   useEffect(() => {
     startPulseAnimation();
     startAltitudeAnimation();
+    
+    // Clean up old letter data on component mount
+    (async () => {
+      try {
+        await clearOldLetters(3); // Clear letters older than 3 days
+        console.log('Old letter data cleaned up');
+      } catch (err) {
+        console.warn('Failed to clear old letters:', err);
+      }
+    })();
+    
+    // load optional offline overlays and detect preinstalled tiles
+    (async () => {
+      try {
+        // detect if tiles exist in documentDirectory/offline_tiles
+        const tilesDir = `${FileSystem.documentDirectory}offline_tiles`;
+        const info = await FileSystem.getInfoAsync(tilesDir);
+        if (info.exists) setOfflineTilesAvailable(true);
+
+        // Load offline data using imported JavaScript modules
+        try {
+          setStateGeoJson(statesGeoJsonData);
+          console.log('States GeoJSON loaded successfully');
+        } catch (err) {
+          console.warn('Could not load states GeoJSON:', err);
+        }
+
+        try {
+          setCities(citiesData);
+          console.log('Cities data loaded successfully');
+        } catch (err) {
+          console.warn('Could not load cities data:', err);
+        }
+      } catch (err) {
+        console.warn('Offline resources check failed', err);
+      }
+    })();
   }, []);
+
+  // Force MapView re-render when style changes to avoid blank tiles on some devices
+  useEffect(() => {
+    setMapKey(`map-${mapStyle}-${Date.now()}`);
+    setMapReady(false);
+    setOfflineMode(false);
+  }, [mapStyle]);
+
+  // If MapView doesn't become ready in time, switch to lightweight offline renderer
+  useEffect(() => {
+    setOfflineMode(false);
+    const t = setTimeout(() => {
+      if (!mapReady) {
+        console.warn('Map did not become ready in time — using offline fallback');
+        setOfflineMode(true);
+      }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [mapKey, mapReady]);
 
   const startPulseAnimation = () => {
     Animated.loop(
@@ -100,32 +176,61 @@ export default function MapScreen({ route, navigation }) {
       // Update flight progress
       const newProgressA = flightProgressPercent(flightA.departureUTC, flightA.arrivalUTC);
       const newProgressB = flightProgressPercent(flightB.departureUTC, flightB.arrivalUTC);
-      
+
       setProgressA(newProgressA);
       setProgressB(newProgressB);
-      
-      // Process and update letter statuses
-      const updatedLetters = await processLetterStatuses();
-      setLetters(updatedLetters);
-      
-      // Count unread delivered letters
-      const unread = updatedLetters.filter(l => l.status === LETTER_STATUS.DELIVERED).length;
-      setUnreadCount(unread);
 
-      // Animate letters
-      updatedLetters.forEach(letter => {
-        if (letter.status === LETTER_STATUS.IN_TRANSIT && !letterAnimations.has(letter.id)) {
-          const anim = new Animated.Value(0);
-          letterAnimations.set(letter.id, anim);
+      // Get actual letters from storage and update their animation progress
+      try {
+        const storedLetters = await getLetters();
+        const now = Date.now();
+        
+        let updatedLetters = storedLetters.map(letter => {
+          if (letter.status !== LETTER_STATUS.IN_TRANSIT) return letter;
           
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 5000, // 5 seconds for letter transit
-            easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-            useNativeDriver: false,
-          }).start();
+          // Letter follows its carrying flight's progress
+          const letterProgress = letter.fromFlight === 'A' ? newProgressA : newProgressB;
+          
+          // Letter can only be delivered when BOTH conditions are met:
+          // 1. The carrying flight has reached its destination (letter progress >= 1)
+          // 2. The receiving flight has also landed at its destination (both flights completed)
+          const carryingFlightLanded = letterProgress >= 1;
+          const receivingFlightLanded = letter.toFlight === 'B' ? newProgressB >= 1 : newProgressA >= 1;
+          
+          const updatedLetter = { ...letter, animationProgress: letterProgress };
+          
+          // Only mark as delivered when both flights have completed their journeys
+          if (carryingFlightLanded && receivingFlightLanded) {
+            updatedLetter.status = LETTER_STATUS.DELIVERED;
+            updatedLetter.deliveredAt = new Date().toISOString();
+          }
+          
+          return updatedLetter;
+        });
+        
+        // Update letters in storage if any changed
+        const hasChanges = updatedLetters.some((letter, index) => 
+          !storedLetters[index] || 
+          letter.animationProgress !== storedLetters[index].animationProgress ||
+          letter.status !== storedLetters[index].status
+        );
+        
+        if (hasChanges) {
+          await AsyncStorage.setItem('@airletters_letters', JSON.stringify(updatedLetters));
         }
-      });
+        
+        setLetters(updatedLetters);
+        setLettersSim(updatedLetters); // Use the actual letters for simulation
+        
+        // Count unread delivered letters
+        const deliveredCount = updatedLetters.filter(l => 
+          l.status === LETTER_STATUS.DELIVERED && !l.readAt
+        ).length;
+        setUnreadCount(deliveredCount);
+        
+      } catch (error) {
+        console.warn('Failed to update letters:', error);
+      }
     };
 
     updateData();
@@ -133,6 +238,185 @@ export default function MapScreen({ route, navigation }) {
     return () => clearInterval(timer);
   }, [flightA, flightB]);
 
+  // Load initial data
+  useEffect(() => {
+    (async () => {
+      try {
+        // Load any existing letters
+        const existingLetters = await getLetters();
+        setLetters(existingLetters);
+        setLettersSim(existingLetters);
+      } catch (error) {
+        console.warn('Failed to load letters:', error);
+      }
+    })();
+  }, []);
+
+  // Custom tasteful map style (light, subtle)
+  const MAP_STYLE = [
+    { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
+    { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#eeeeee' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#cfe9ff' }] },
+  ];
+
+  const OfflineMapView = ({ w = width, h = height }) => {
+    console.log('OfflineMapView rendering with:', { w, h, stateGeoJson: !!stateGeoJson, cities: !!cities });
+    console.log('stateGeoJson features:', stateGeoJson?.features?.length || 'none');
+    console.log('cities count:', cities?.length || 'none');
+    
+    const latLngToPointLocal = (lat, lon) => {
+      const { latMin, latMax, lonMin, lonMax } = INDIA_BOUNDS;
+      const x = ((lon - lonMin) / (lonMax - lonMin)) * w;
+      const y = ((latMax - lat) / (latMax - latMin)) * h;
+      return { x, y };
+    };
+
+    return (
+      <View style={[styles.offlineMap, { width: w, height: h }] }>
+        <View style={styles.offlineGrid} />
+        {/* Flight routes as clean lines */}
+        <View style={{ position: 'absolute', left: 0, top: 0, width: w, height: h }}>
+          {coordsA.map((c, i) => i > 0 && (
+            <View key={`segA-${i}`} style={{ position: 'absolute', left: Math.min(latLngToPointLocal(coordsA[i-1].latitude, coordsA[i-1].longitude).x, latLngToPointLocal(c.latitude, c.longitude).x), top: Math.min(latLngToPointLocal(coordsA[i-1].latitude, coordsA[i-1].longitude).y, latLngToPointLocal(c.latitude, c.longitude).y), width: Math.abs(latLngToPointLocal(c.latitude, c.longitude).x - latLngToPointLocal(coordsA[i-1].latitude, coordsA[i-1].longitude).x) || 2, height: 2, backgroundColor: theme.colors.primary, opacity: 0.9 }} />
+          ))}
+          {coordsB.map((c, i) => i > 0 && (
+            <View key={`segB-${i}`} style={{ position: 'absolute', left: Math.min(latLngToPointLocal(coordsB[i-1].latitude, coordsB[i-1].longitude).x, latLngToPointLocal(c.latitude, c.longitude).x), top: Math.min(latLngToPointLocal(coordsB[i-1].latitude, coordsB[i-1].longitude).y, latLngToPointLocal(c.latitude, c.longitude).y), width: Math.abs(latLngToPointLocal(c.latitude, c.longitude).x - latLngToPointLocal(coordsB[i-1].latitude, coordsB[i-1].longitude).x) || 2, height: 2, backgroundColor: theme.colors.accent, opacity: 0.9 }} />
+          ))}
+        </View>
+
+        {/* Vector state polygons when available */}
+        {(() => {
+          console.log('Checking stateGeoJson:', { 
+            exists: !!stateGeoJson, 
+            hasFeatures: !!(stateGeoJson && stateGeoJson.features), 
+            featureCount: stateGeoJson?.features?.length || 0 
+          });
+          return stateGeoJson && stateGeoJson.features && stateGeoJson.features.length > 0;
+        })() && (
+          <Svg width={w} height={h} style={{ position: 'absolute', left: 0, top: 0 }}>
+            <G>
+              {stateGeoJson.features.map((f, idx) => {
+                console.log('Rendering state feature:', f.properties?.name);
+                const geom = f.geometry;
+                if (!geom) return null;
+                const polygons = (geom.type === 'Polygon') ? [geom.coordinates] : (geom.type === 'MultiPolygon' ? geom.coordinates : []);
+                return polygons.map((rings, rIdx) => {
+                  const outer = rings[0] || [];
+                  if (!outer.length) return null;
+                  const points = outer.map(c => {
+                    const p = latLngToPointLocal(c[1], c[0]);
+                    console.log(`State ${f.properties?.name} coord [${c[1]}, ${c[0]}] -> [${p.x}, ${p.y}]`);
+                    return `${p.x},${p.y}`;
+                  }).join(' ');
+                  const centroid = outer.reduce((acc, c) => ({ x: acc.x + c[0], y: acc.y + c[1] }), { x: 0, y: 0 });
+                  centroid.x /= outer.length; centroid.y /= outer.length;
+                  const centroidPt = latLngToPointLocal(centroid.y, centroid.x);
+                  console.log(`State ${f.properties?.name} centroid: [${centroidPt.x}, ${centroidPt.y}]`);
+                  return (
+                    <G key={`state-${idx}-${rIdx}`}>
+                      <SvgPolygon 
+                        points={points} 
+                        fill="rgba(100, 150, 255, 0.3)" 
+                        stroke="blue" 
+                        strokeWidth={2} 
+                        opacity={1} 
+                      />
+                      <SvgText 
+                        x={centroidPt.x} 
+                        y={centroidPt.y} 
+                        fontSize={14} 
+                        fill="darkblue" 
+                        fontWeight="bold"
+                        textAnchor="middle"
+                      >
+                        {(f.properties && f.properties.name) || f.id}
+                      </SvgText>
+                    </G>
+                  );
+                });
+              })}
+            </G>
+          </Svg>
+        )}
+
+        {/* City labels */}
+        {(() => {
+          console.log('Checking cities:', { exists: !!cities, count: cities?.length || 0 });
+          return cities && cities.length > 0;
+        })() && (
+          <Svg width={w} height={h} style={{ position: 'absolute', left: 0, top: 0 }}>
+            <G>
+              {cities.map((c, i) => {
+                const p = latLngToPointLocal(c.lat, c.lon);
+                console.log(`City ${c.name} [${c.lat}, ${c.lon}] -> [${p.x}, ${p.y}]`);
+                return (
+                  <SvgText 
+                    key={`city-${i}`} 
+                    x={p.x} 
+                    y={p.y} 
+                    fontSize={13} 
+                    fill="red" 
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {c.name}
+                  </SvgText>
+                );
+              })}
+            </G>
+          </Svg>
+        )}
+
+        {/* Letter markers and trails following simulated progress */}
+        {lettersSim.map(l => {
+          const pos = l.fromFlight === 'A' ? interpolateRoute(coordsA, l.animationProgress || 0) : interpolateRoute(coordsB, l.animationProgress || 0);
+          const leftPos = ((pos.longitude - INDIA_BOUNDS.lonMin) / (INDIA_BOUNDS.lonMax - INDIA_BOUNDS.lonMin)) * w - 12;
+          const topPos = ((INDIA_BOUNDS.latMax - pos.latitude) / (INDIA_BOUNDS.latMax - INDIA_BOUNDS.latMin)) * h - 12;
+          
+          return (
+            <View key={l.id}>
+              {/* Trail effect for in-transit letters */}
+              {l.status === LETTER_STATUS.IN_TRANSIT && (
+                <>
+                  <View style={{ 
+                    position: 'absolute', 
+                    left: leftPos + 8, 
+                    top: topPos + 8, 
+                    width: 3, 
+                    height: 15, 
+                    backgroundColor: theme.colors.primary, 
+                    opacity: 0.6, 
+                    borderRadius: 2 
+                  }} />
+                  <View style={{ 
+                    position: 'absolute', 
+                    left: leftPos + 6, 
+                    top: topPos + 6, 
+                    width: 2, 
+                    height: 10, 
+                    backgroundColor: theme.colors.primary, 
+                    opacity: 0.3, 
+                    borderRadius: 1 
+                  }} />
+                </>
+              )}
+              
+              {/* Main letter marker */}
+              <View style={{ position: 'absolute', left: leftPos, top: topPos }}>
+                <View style={{ backgroundColor: theme.colors.primary, padding: 6, borderRadius: 16 }}>
+                  <Text style={{ color: '#fff' }}>
+                    {l.status === LETTER_STATUS.DELIVERED ? '📬' : '✉️'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
   const interpolateRoute = (route, progress) => {
     if (progress <= 0) return route[0];
     if (progress >= 1) return route[route.length - 1];
@@ -206,8 +490,57 @@ export default function MapScreen({ route, navigation }) {
     return conditions[Math.floor(Math.random() * conditions.length)];
   };
 
+  const renderLetterTrailMarkers = () => {
+    const trailMarkers = [];
+    
+    lettersSim.forEach(letter => {
+      if (letter.status !== LETTER_STATUS.IN_TRANSIT) return;
+      
+      const progress = letter.animationProgress || 0;
+      const sourceCoords = letter.fromFlight === 'A' ? coordsA : coordsB;
+      const destCoords = letter.toFlight === 'A' ? coordsA : coordsB;
+      
+      const sourcePos = interpolateRoute(sourceCoords, letter.fromFlight === 'A' ? progressA : progressB);
+      const destPos = interpolateRoute(destCoords, letter.toFlight === 'A' ? progressA : progressB);
+      
+      // Create trail markers at previous positions
+      const trailLength = 5; // Number of trail markers
+      for (let i = 1; i <= trailLength; i++) {
+        const trailProgress = Math.max(0, progress - (i * 0.05)); // 5% intervals
+        if (trailProgress <= 0) break;
+        
+        const trailPosition = {
+          latitude: sourcePos.latitude + (destPos.latitude - sourcePos.latitude) * trailProgress,
+          longitude: sourcePos.longitude + (destPos.longitude - sourcePos.longitude) * trailProgress,
+        };
+        
+        const opacity = 1 - (i / trailLength); // Fade older trail markers
+        
+        trailMarkers.push(
+          <Marker
+            key={`${letter.id}-trail-${i}`}
+            coordinate={trailPosition}
+            style={{ zIndex: 400 - i }}
+          >
+            <View style={{
+              width: 8 - (i * 1),
+              height: 8 - (i * 1),
+              borderRadius: 4 - (i * 0.5),
+              backgroundColor: letter.fromFlight === 'A' ? theme.colors.primary : theme.colors.accent,
+              opacity: opacity * 0.6,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.8)'
+            }} />
+          </Marker>
+        );
+      }
+    });
+    
+    return trailMarkers;
+  };
+
   const renderLetterMarkers = () => {
-    return letters.map(letter => {
+    return lettersSim.map(letter => {
       if (letter.status === LETTER_STATUS.SCHEDULED) {
         return null;
       }
@@ -218,28 +551,34 @@ export default function MapScreen({ route, navigation }) {
       
       if (letter.status === LETTER_STATUS.IN_TRANSIT) {
         const progress = letter.animationProgress || 0;
-        const flightAPos = interpolateRoute(coordsA, progressA);
-        const flightBPos = interpolateRoute(coordsB, progressB);
         
-        // Add altitude simulation to letter position
-        const basePos = {
-          latitude: flightAPos.latitude + (flightBPos.latitude - flightAPos.latitude) * progress,
-          longitude: flightAPos.longitude + (flightBPos.longitude - flightAPos.longitude) * progress,
-        };
+        // Get source and destination positions based on letter direction
+        const sourceCoords = letter.fromFlight === 'A' ? coordsA : coordsB;
+        const destCoords = letter.toFlight === 'A' ? coordsA : coordsB;
         
+        const sourcePos = interpolateRoute(sourceCoords, letter.fromFlight === 'A' ? progressA : progressB);
+        const destPos = interpolateRoute(destCoords, letter.toFlight === 'A' ? progressA : progressB);
+        
+        // Interpolate letter position between source and destination flights
         letterPosition = {
-          ...basePos,
-          latitude: basePos.latitude + getAltitudeOffset(progress)
+          latitude: sourcePos.latitude + (destPos.latitude - sourcePos.latitude) * progress,
+          longitude: sourcePos.longitude + (destPos.longitude - sourcePos.longitude) * progress,
         };
         
         emoji = '✉️';
         markerSize = 1 + (progress * 0.3); // Grow slightly during transit
       } else if (letter.status === LETTER_STATUS.DELIVERED) {
-        letterPosition = interpolateRoute(coordsB, progressB);
+        // Position at destination flight
+        const destCoords = letter.toFlight === 'A' ? coordsA : coordsB;
+        const destProgress = letter.toFlight === 'A' ? progressA : progressB;
+        letterPosition = interpolateRoute(destCoords, destProgress);
         emoji = '📬';
         markerSize = 1.2;
       } else if (letter.status === LETTER_STATUS.READ) {
-        letterPosition = interpolateRoute(coordsB, progressB);
+        // Position at destination flight
+        const destCoords = letter.toFlight === 'A' ? coordsA : coordsB;
+        const destProgress = letter.toFlight === 'A' ? progressA : progressB;
+        letterPosition = interpolateRoute(destCoords, destProgress);
         emoji = '📭';
         markerSize = 0.9;
       }
@@ -268,9 +607,18 @@ export default function MapScreen({ route, navigation }) {
             </Text>
           </Animated.View>
           
-          {/* Add trail effect for in-transit letters */}
+          {/* Enhanced trail effect for in-transit letters */}
           {letter.status === LETTER_STATUS.IN_TRANSIT && (
-            <View style={styles.letterTrail} />
+            <Animated.View style={{
+              transform: [{ scale: pulseAnim.interpolate({
+                inputRange: [1, 1.2],
+                outputRange: [1, 1.1]
+              }) }]
+            }}>
+              <View style={styles.letterTrail} />
+              <View style={[styles.letterTrail, { opacity: 0.4, top: -8, left: 8, width: 3, height: 15 }]} />
+              <View style={[styles.letterTrail, { opacity: 0.2, top: -6, left: 6, width: 2, height: 10 }]} />
+            </Animated.View>
           )}
         </Marker>
       );
@@ -389,6 +737,10 @@ export default function MapScreen({ route, navigation }) {
         {renderFlightMarker(coordsB, progressB, flightB.flightNumber, '🛫')}
 
         {/* Letter markers */}
+        {/* Render letter trail markers first (lower z-index) */}
+        {renderLetterTrailMarkers()}
+        
+        {/* Render main letter markers */}
         {renderLetterMarkers()}
         
         {/* Airport markers */}
@@ -636,5 +988,16 @@ const styles = StyleSheet.create({
     top: -10,
     left: 10,
     transform: [{ rotate: '45deg' }],
+  },
+  offlineMap: {
+    backgroundColor: '#f8fafb',
+  },
+  offlineGrid: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent'
   },
 });
